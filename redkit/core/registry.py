@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Type
 
 _REGISTRY: Dict[str, Type] = {}
 
-PHASES = ["recon", "access", "postex", "lateral", "payloads", "report", "misc"]
+PHASES = ["recon", "web", "access", "postex", "lateral", "payloads", "report", "misc"]
 
 
 def register(cls: Type) -> Type:

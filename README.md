@@ -63,8 +63,14 @@ Every module has a dotted `name` (`recon.port_scan`), belongs to a **phase**,
 and declares its **options**. Modules read from and write to the shared
 engagement, so recon feeds access feeds the report automatically.
 
-**Phases** — the kill chain: `recon → access → postex → lateral → payloads →
-report`.
+**Phases** — the kill chain: `recon → web → access → postex → lateral →
+payloads → report`. The **web** phase is the primary focus: a full web
+attack arsenal.
+
+**Web options** — every `web.*` module shares a common set of options so you
+can test authenticated apps and route through an intercepting proxy:
+`-o cookie='PHPSESSID=…; auth=1'`, `-o header='X-API-Key: abc||X-Env: dev'`,
+`-o proxy=http://127.0.0.1:8080` (Burp/ZAP), `-o insecure=true` (ignore TLS).
 
 ---
 
@@ -99,6 +105,30 @@ python -m redkit run payloads.listener -o lport=443
 python -m redkit -e op-acme report
 ```
 
+### Web pentest flow
+
+```bash
+# Map the app: crawl, pull JS endpoints + leaked secrets
+python -m redkit -e web run web.crawl -o url=https://target.tld
+
+# Find hidden parameters, then fuzz them for bugs
+python -m redkit -e web run web.param_fuzz -o url=https://target.tld/search
+
+# Injection testing (route through Burp, keep your session)
+python -m redkit -e web run web.sqli \
+  -o url='https://target.tld/item?id=1' \
+  -o cookie='session=abc' -o proxy=http://127.0.0.1:8080
+python -m redkit -e web run web.ssti -o url='https://target.tld/hello?name=x'
+python -m redkit -e web run web.lfi  -o url='https://target.tld/?file=home'
+
+# JWT attacks — fully offline (no target needed)
+python -m redkit run web.jwt -o token=eyJ... -o action=brute      # crack the HMAC secret
+python -m redkit run web.jwt -o token=eyJ... -o action=none       # forge an alg=none token
+
+# Everything you find lands in the engagement → one report
+python -m redkit -e web report
+```
+
 Prefer a menu? Launch the interactive shell:
 
 ```bash
@@ -122,6 +152,23 @@ Global flags: `-e/--engagement <name>`, `-v/--verbose`, `--dry-run`
 | `recon.host_discovery` | Live-host sweep over CIDR/range via TCP-ping, ICMP, or ARP |
 | `recon.web_enum` | HTTP fingerprint, security-header audit, robots/sitemap, directory brute |
 | `recon.dns_enum` | DNS records, subdomain brute force, zone-transfer (AXFR) check |
+
+### web  ← primary focus
+| module | what it does |
+| --- | --- |
+| `web.crawl` | Same-origin spider; extracts links, forms, params, JS endpoints and leaked secrets |
+| `web.param_fuzz` | Hidden GET/POST parameter discovery (arjun-style, binary-split isolation) |
+| `web.vhost` | Virtual-host discovery via `Host:` header fuzzing |
+| `web.sqli` | SQL injection tester — error / boolean / time-based (optional `sqlmap` handoff) |
+| `web.xss` | Reflected XSS probe with reflection-context classification |
+| `web.ssti` | Server-side template injection detection + engine fingerprint |
+| `web.lfi` | Path traversal / LFI (encodings, `php://filter` source disclosure) |
+| `web.cmdi` | OS command injection — marker + time-based |
+| `web.ssrf` | SSRF probe (internal targets, cloud metadata, optional callback) |
+| `web.jwt` | JWT toolkit — decode, `alg=none` forge, HMAC secret brute, re-sign/tamper (offline) |
+| `web.cors` | CORS misconfiguration tester (origin reflection + credentials) |
+| `web.graphql` | GraphQL endpoint discovery + introspection dump |
+| `web.webshell` | Web shell + upload-filter-bypass generator (offline; php/jsp/aspx/…) |
 
 ### access
 | module | what it does |

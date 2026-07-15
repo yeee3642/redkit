@@ -1,0 +1,10 @@
+# redkit runs on the Python standard library alone — no hard dependencies.
+#
+# The packages below are OPTIONAL. Each enriches a specific module but every
+# module has a pure-stdlib fallback (or degrades gracefully) when it is absent,
+# so redkit still works air-gapped with nothing installed.
+#
+# Install with:  pip install -r requirements.txt   (or  pip install .[extra])
+
+paramiko>=2.7   ; python_version >= "3.8"   # native SSH (access.cred_spray)
+requests>=2.25  ; python_version >= "3.8"   # richer HTTP (recon.web_enum)

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# redkit runtime workspace (engagement data must never be committed)
+.redkit/
+*.engagement.json
+engagements/
+*.evidence.log
+loot/
+reports/*.md
+reports/*.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -77,5 +77,43 @@ class TestResult(unittest.TestCase):
         self.assertEqual(r.artifacts, [])
 
 
+class TestRating(unittest.TestCase):
+    def test_cvss_known_scores(self):
+        from redkit.core import rating
+
+        self.assertEqual(rating.cvss_base("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:N/C:H/I:H/A:H"), (9.8, "critical"))
+        self.assertEqual(rating.cvss_base("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:N/C:H/I:N/A:N"), (7.5, "high"))
+        self.assertEqual(rating.cvss_base("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"), (6.1, "medium"))
+        self.assertEqual(rating.cvss_base("garbage"), (0.0, "none"))
+
+    def test_classify(self):
+        from redkit.core import rating
+
+        self.assertEqual(rating.classify("SQL injection in id"), "sqli")
+        self.assertEqual(rating.classify("Reflected XSS: q"), "xss")
+        self.assertEqual(rating.classify("Exposed sensitive file: /.git/config"), "git-exposure")
+        self.assertEqual(rating.classify("JWT HMAC secret cracked"), "jwt-weak-secret")
+
+    def test_enrich_adds_poc_rating_and_submittable(self):
+        from redkit.core import rating
+
+        f = {
+            "title": "SQL injection (error-based) in parameter 'id'",
+            "severity": "critical",
+            "evidence": "param='id' payload='",
+            "host": "h",
+        }
+        rating.enrich_finding(f, target_url="http://h/item?id=1")
+        self.assertEqual(f["cvss_score"], 9.8)
+        self.assertEqual(f["cwe"], "CWE-89")
+        self.assertTrue(f["submittable"])
+        self.assertIn("curl", f["poc"])
+
+        # a low-confidence heuristic finding must not be auto-submittable
+        g = {"title": "Suspected SSRF via 'url' [low-confidence]", "evidence": "param=url", "host": "h"}
+        rating.enrich_finding(g, target_url="http://h/f?url=x")
+        self.assertFalse(g["submittable"])
+
+
 if __name__ == "__main__":
     unittest.main()

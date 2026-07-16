@@ -167,11 +167,18 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     ctx = build_context(args)
-    cls = registry.get("report.markdown")
-    if not cls:
-        ctx.console.bad("report module not available")
-        return 1
-    opts = cls.resolve_options({"format": args.format} if args.format else {})
+    if args.format == "pentest":
+        cls = registry.get("report.pentest")
+        if not cls:
+            ctx.console.bad("report.pentest module not available")
+            return 1
+        opts = cls.resolve_options({})
+    else:
+        cls = registry.get("report.markdown")
+        if not cls:
+            ctx.console.bad("report module not available")
+            return 1
+        opts = cls.resolve_options({"format": args.format} if args.format else {})
     result = cls().run(opts, ctx)
     if result and result.ok:
         ctx.console.good(result.summary)
@@ -278,7 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("-o", "--option", action="append", metavar="key=value", help="module option (repeatable)")
 
     p_report = sub.add_parser("report", help="generate engagement report")
-    p_report.add_argument("-f", "--format", choices=["markdown", "md", "json"], default=None)
+    p_report.add_argument("-f", "--format", choices=["markdown", "md", "json", "pentest"], default=None)
 
     sub.add_parser("shell", help="interactive menu")
     sub.add_parser("version", help="print version")

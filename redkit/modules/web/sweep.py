@@ -11,10 +11,11 @@ ranks what they find. Everything it runs is bounded by max_targets/max_params.
 """
 from __future__ import annotations
 
+import re
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
-from redkit.core import registry
+from redkit.core import rating, registry
 from redkit.core.http import WEB_COMMON_OPTIONS
 from redkit.core.module import Module, Option, Result
 from redkit.core.registry import register
@@ -40,6 +41,7 @@ class WebSweep(Module):
         Option("crawl", default=True, help="Spider the target to discover more injection points"),
         Option("max_targets", default=15, help="Max injection-point URLs to test"),
         Option("max_params", default=12, help="Max discovered params attached per target URL"),
+        Option("report", default=True, help="Generate a full pentest report (PoCs + CVSS) at the end"),
     ] + WEB_COMMON_OPTIONS
     references = [
         "https://owasp.org/www-project-web-security-testing-guide/",
@@ -65,6 +67,7 @@ class WebSweep(Module):
 
         web_opts = {k: opts[k] for k in _WEB_OPT_NAMES if k in opts}
         cookie = str(opts.get("cookie", "") or "")
+        proxy = str(opts.get("proxy", "") or "")
 
         console.banner("web.sweep", f"target={origin}  active={active}  aggressive={aggressive}")
         ctx.engagement.add_host(host)
@@ -73,10 +76,16 @@ class WebSweep(Module):
         hits: List[Dict[str, Any]] = []
 
         def run_mod(name: str, extra: Dict[str, Any], how_fn) -> Optional[Result]:
-            """Invoke a sub-module, attribute any new findings, build a how-to."""
+            """Invoke a sub-module, rate + PoC any new findings, build a how-to."""
             before = len(ctx.engagement.data["findings"])
             res = _call(ctx, name, extra, web_opts)
             for f in ctx.engagement.data["findings"][before:]:
+                rating.enrich_finding(
+                    f, cookie=cookie, proxy=proxy,
+                    target_url=str(extra.get("url", "")),
+                    method=str(extra.get("method", "GET")),
+                    data=str(extra.get("data", "")),
+                )
                 hits.append({"finding": f, "module": name, "how": how_fn(extra, f)})
             return res
 
@@ -128,21 +137,36 @@ class WebSweep(Module):
         else:
             console.info("active testing disabled (-o active=false); recon/misconfig only")
 
-        # -- 4. rank & report --------------------------------------------- #
+        # -- 4. rank, report, PoCs ---------------------------------------- #
         ranked = _rank(hits)
-        artifact = _write_plan(ctx, host, origin, ranked)
+        artifacts: List[str] = []
+        plan = _write_plan(ctx, host, origin, ranked)
+        if plan:
+            artifacts.append(plan)
         _print_plan(console, ranked)
 
-        n_crit = sum(1 for h in ranked if h["finding"]["severity"] == "critical")
-        n_high = sum(1 for h in ranked if h["finding"]["severity"] == "high")
+        if bool(opts["report"]):
+            rep = _call(ctx, "report.pentest", {}, {})
+            if rep and rep.artifacts:
+                artifacts.extend(rep.artifacts)
+                for a in rep.artifacts:
+                    console.good(f"report: {a}")
+
+        def _sev(h):
+            return h["finding"].get("cvss_severity") or h["finding"].get("severity") or "info"
+
+        n_crit = sum(1 for h in ranked if _sev(h) == "critical")
+        n_high = sum(1 for h in ranked if _sev(h) == "high")
+        n_sub = sum(1 for h in ranked if h["finding"].get("submittable"))
         summary = (
-            f"{len(ranked)} exploitable issue(s) on {host}: "
-            f"{n_crit} critical, {n_high} high"
+            f"{len(ranked)} issue(s) on {host}: {n_crit} critical, {n_high} high; "
+            f"{n_sub} submittable"
         )
         ctx.engagement.add_note(f"web.sweep: {summary}")
         return Result(ok=True, summary=summary,
-                      data={"host": host, "hits": len(ranked), "critical": n_crit, "high": n_high},
-                      artifacts=[artifact] if artifact else [])
+                      data={"host": host, "hits": len(ranked), "critical": n_crit,
+                            "high": n_high, "submittable": n_sub},
+                      artifacts=artifacts)
 
 
 # --------------------------------------------------------------------------- #
@@ -244,19 +268,41 @@ def _cmd(module: str, url: str, cookie: str, extra: str = "") -> str:
 
 
 def _rank(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Dedupe and sort findings by exploitability (severity, then title)."""
+    """Sort findings by exploitability, then collapse noisy per-payload variants.
+
+    Confirmed/submittable findings sort above unconfirmed ones at the same
+    score, so the plan surfaces what you can actually act on first. Multiple
+    payload variants of the same class on the same parameter (e.g. 8 open-redirect
+    payloads on ?url=) collapse to one plan entry; the full report keeps them all.
+    """
+    hits = sorted(hits, key=lambda h: (
+        0 if h["finding"].get("submittable") else 1,
+        -float(h["finding"].get("cvss_score") or 0.0),
+        -_SEV_WEIGHT.get(h["finding"].get("cvss_severity") or h["finding"].get("severity", "info"), 0),
+        h["finding"].get("id", ""),
+    ))
     seen = set()
     unique = []
     for h in hits:
         f = h["finding"]
-        key = (f.get("title"), f.get("host"), f.get("evidence"))
+        param = _param_of(f)
+        # collapse only param-bearing variants; keep every distinct param-less finding
+        key = (f.get("category"), f.get("host"), param) if param else ("_id", f.get("id"))
         if key in seen:
             continue
         seen.add(key)
         unique.append(h)
-    unique.sort(key=lambda h: (-_SEV_WEIGHT.get(h["finding"].get("severity", "info"), 0),
-                               h["finding"].get("id", "")))
     return unique
+
+
+def _param_of(f: Dict[str, Any]) -> Optional[str]:
+    text = f"{f.get('evidence') or ''} {f.get('title') or ''} {f.get('description') or ''}"
+    for pat in (r"param(?:eter)?[=\s'\"]+([A-Za-z0-9_.\[\]-]+)",
+                r"'([A-Za-z0-9_]+)' parameter", r"via '([A-Za-z0-9_]+)'"):
+        m = re.search(pat, text)
+        if m:
+            return m.group(1)
+    return None
 
 
 def _print_plan(console, ranked: List[Dict[str, Any]]) -> None:
@@ -268,14 +314,21 @@ def _print_plan(console, ranked: List[Dict[str, Any]]) -> None:
     rows = []
     for i, h in enumerate(ranked, 1):
         f = h["finding"]
-        where = f.get("evidence") or f.get("host") or ""
-        rows.append([i, f.get("severity", "").upper(), f.get("title", ""), _short(where, 42)])
-    console.table(["#", "SEV", "VULN", "WHERE"], rows)
+        sev = (f.get("cvss_severity") or f.get("severity") or "").upper()
+        rows.append([i, f.get("cvss_score", ""), sev, "Y" if f.get("submittable") else "",
+                     f.get("title", ""), _short(f.get("host") or "", 22)])
+    console.table(["#", "CVSS", "SEV", "SUB", "VULN", "HOST"], rows)
     console.raw("")
-    console.raw("How to press each (top items):")
-    for i, h in enumerate(ranked[:12], 1):
-        console.raw(f"  {i}. [{h['finding'].get('severity','').upper()}] {h['finding'].get('title','')}")
-        console.raw(f"       {h['how']}")
+    console.raw("How to press each (top items) - PoC + next step:")
+    for i, h in enumerate(ranked[:10], 1):
+        f = h["finding"]
+        sev = (f.get("cvss_severity") or f.get("severity") or "").upper()
+        console.raw(f"  {i}. [{f.get('cvss_score','')} {sev}] {f.get('title','')}"
+                    f"{'  (submittable)' if f.get('submittable') else ''}")
+        poc = f.get("poc") or {}
+        if poc.get("curl"):
+            console.raw(f"       PoC : {poc['curl']}")
+        console.raw(f"       next: {h['how']}")
 
 
 def _write_plan(ctx, host: str, origin: str, ranked: List[Dict[str, Any]]) -> Optional[str]:

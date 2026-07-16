@@ -108,12 +108,19 @@ python -m redkit -e op-acme report
 ### Web pentest flow
 
 ```bash
-# One shot: scan the whole app and get a RANKED "what you can hit" list
+# One shot: scan the whole app -> ranked hit list + PoCs + a full report
 python -m redkit -e web run web.sweep -o url=https://target.tld
-#   -> crawls, fingerprints, tests every bug class, then prints an attack plan
-#      ordered by exploitability + the exact command to press each finding.
-#   Route through Burp and keep your session: add -o proxy=... -o cookie=...
-#   Go deeper/slower (time-based sqli, cmdi): add -o aggressive=true
+#   For every finding you get: a CVSS 3.1 risk rating, a runnable PoC
+#   (curl + raw HTTP request), and a "submittable" flag (confirmed & report-
+#   worthy). A full vulnerability report (Markdown + JSON) is written too:
+#       .../work/attack_plan.md      ranked "what you can hit"
+#       .../work/report_pentest.md   full report w/ PoCs + remediation
+#       .../work/report_pentest.json machine-readable (bug-bounty pipelines)
+#   Route through Burp / keep your session: -o proxy=... -o cookie=...
+#   Go deeper/slower (time-based sqli, cmdi): -o aggressive=true
+
+# Re-generate the vuln report from an engagement at any time:
+python -m redkit -e web report -f pentest
 
 # ...or drive individual modules. Map the app first:
 python -m redkit -e web run web.crawl -o url=https://target.tld
@@ -209,6 +216,7 @@ Global flags: `-e/--engagement <name>`, `-v/--verbose`, `--dry-run`
 | module | what it does |
 | --- | --- |
 | `report.markdown` | Build a Markdown (or JSON) report from the engagement state |
+| `report.pentest` | **Vulnerability report with per-finding PoCs, CVSS 3.1 risk ratings, and a submittable list** (Markdown + machine-readable JSON) |
 
 ---
 

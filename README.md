@@ -105,24 +105,73 @@ python -m redkit run payloads.listener -o lport=443
 python -m redkit -e op-acme report
 ```
 
-### Web pentest flow
+### The one-command full scan
+
+`web.sweep` is the single command that does everything: it crawls the target,
+runs the whole web arsenal, and for every finding attaches a **CVSS 3.1 risk
+rating**, a **runnable PoC** (curl + raw HTTP request), and a **submittable**
+flag — then writes a full vulnerability report.
+
+**Maximum-coverage one-liner** (everything cranked up):
 
 ```bash
-# One shot: scan the whole app -> ranked hit list + PoCs + a full report
-python -m redkit -e web run web.sweep -o url=https://target.tld
-#   For every finding you get: a CVSS 3.1 risk rating, a runnable PoC
-#   (curl + raw HTTP request), and a "submittable" flag (confirmed & report-
-#   worthy). A full vulnerability report (Markdown + JSON) is written too:
-#       .../work/attack_plan.md      ranked "what you can hit"
-#       .../work/report_pentest.md   full report w/ PoCs + remediation
-#       .../work/report_pentest.json machine-readable (bug-bounty pipelines)
-#   Route through Burp / keep your session: -o proxy=... -o cookie=...
-#   Go deeper/slower (time-based sqli, cmdi): -o aggressive=true
+python -m redkit -v -e op1 run web.sweep \
+  -o url=https://target.tld \
+  -o aggressive=true \
+  -o max_targets=50 \
+  -o max_params=25 \
+  -o timeout=15
+```
 
-# Re-generate the vuln report from an engagement at any time:
-python -m redkit -e web report -f pentest
+**Authenticated target, routed through Burp/ZAP** (the everyday variant):
 
-# ...or drive individual modules. Map the app first:
+```bash
+python -m redkit -v -e op1 run web.sweep \
+  -o url=https://target.tld \
+  -o aggressive=true \
+  -o max_targets=50 -o max_params=25 \
+  -o cookie='session=xxx; auth=1' \
+  -o header='Authorization: Bearer xxx' \
+  -o proxy=http://127.0.0.1:8080 \
+  -o insecure=true -o timeout=15
+```
+
+`active`, `crawl`, and `report` default to `true`, so you don't pass them.
+It writes three files into `~/.redkit/engagements/op1/work/`:
+
+| file | what it is |
+| --- | --- |
+| `attack_plan.md` | ranked "what you can hit" list + a PoC per finding |
+| `report_pentest.md` | full report: CVSS, CWE, PoC, evidence, remediation |
+| `report_pentest.json` | machine-readable findings (bug-bounty pipelines) |
+
+Re-generate the report from an engagement at any time:
+`python -m redkit -e op1 report -f pentest`.
+
+**web.sweep flags**
+
+| flag | effect |
+| --- | --- |
+| `-v` | show each sub-module's progress |
+| `-e <name>` | engagement/workspace to store results in |
+| `-o aggressive=true` | enable slow time-based checks (SQLi time, cmdi) |
+| `-o max_targets=50` `-o max_params=25` | widen coverage (more URLs/params tested) |
+| `-o cookie=…` `-o header=…` | test authenticated pages |
+| `-o proxy=http://127.0.0.1:8080` | route everything through Burp/ZAP |
+| `-o insecure=true` | ignore TLS certificate errors (default on) |
+| `-o active=false` | recon/misconfig only — send no attack payloads |
+
+> `aggressive=true` with a large `max_targets` sends more requests and is
+> slower — run it only against targets you are **authorized** to test. For a
+> quick pass, drop `aggressive` and leave `max_targets` at its default of 15.
+
+### Driving individual modules
+
+`web.sweep` (above) runs all of these for you. Reach for them directly when you
+want to focus on one target or bug class.
+
+```bash
+# Map the app: crawl, pull JS endpoints + leaked secrets
 python -m redkit -e web run web.crawl -o url=https://target.tld
 
 # Find hidden parameters, then fuzz them for bugs

@@ -108,7 +108,14 @@ python -m redkit -e op-acme report
 ### Web pentest flow
 
 ```bash
-# Map the app: crawl, pull JS endpoints + leaked secrets
+# One shot: scan the whole app and get a RANKED "what you can hit" list
+python -m redkit -e web run web.sweep -o url=https://target.tld
+#   -> crawls, fingerprints, tests every bug class, then prints an attack plan
+#      ordered by exploitability + the exact command to press each finding.
+#   Route through Burp and keep your session: add -o proxy=... -o cookie=...
+#   Go deeper/slower (time-based sqli, cmdi): add -o aggressive=true
+
+# ...or drive individual modules. Map the app first:
 python -m redkit -e web run web.crawl -o url=https://target.tld
 
 # Find hidden parameters, then fuzz them for bugs
@@ -156,7 +163,11 @@ Global flags: `-e/--engagement <name>`, `-v/--verbose`, `--dry-run`
 ### web  ← primary focus
 | module | what it does |
 | --- | --- |
+| **`web.sweep`** | **One-shot triage: runs the whole web arsenal, then prints a *ranked* "what you can hit" attack plan** |
 | `web.crawl` | Same-origin spider; extracts links, forms, params, JS endpoints and leaked secrets |
+| `web.secrets` | Detect exposed `.git` / `.env` / `.htpasswd` / backups via content signatures (optional git dump) |
+| `web.redirect` | Open-redirect tester (absolute / protocol-relative / whitelist-bypass payloads) |
+| `web.waf` | WAF / CDN fingerprint (Cloudflare, Akamai, Imperva, AWS WAF, ModSecurity, …) |
 | `web.param_fuzz` | Hidden GET/POST parameter discovery (arjun-style, binary-split isolation) |
 | `web.vhost` | Virtual-host discovery via `Host:` header fuzzing |
 | `web.sqli` | SQL injection tester — error / boolean / time-based (optional `sqlmap` handoff) |

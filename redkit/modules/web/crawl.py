@@ -505,6 +505,20 @@ class WebCrawl(Module):
                 evidence=rec["source"],
             )
 
+        # Real injection points: param-bearing GET URLs actually seen, and the
+        # forms (action/method/inputs) discovered. These let a downstream sweep
+        # attack the exact endpoints rather than guessing param/path pairings.
+        get_targets = sorted(u for u in visited if urllib.parse.urlsplit(u).query)
+        form_targets: List[Dict[str, object]] = []
+        _seen_forms = set()
+        for pg in pages.values():
+            for fm in (pg.get("forms") or []):  # type: ignore[union-attr]
+                key = (fm.get("action"), fm.get("method"))
+                if key in _seen_forms:
+                    continue
+                _seen_forms.add(key)
+                form_targets.append(fm)
+
         data = {
             "start_url": start_url,
             "host": host_only,
@@ -518,6 +532,8 @@ class WebCrawl(Module):
             "params": params_to_store[:500],
             "endpoints": endpoints_to_store[:500],
             "secrets": secret_records[:200],
+            "get_targets": get_targets[:500],
+            "form_targets": form_targets[:200],
         }
 
         artifacts = self._write_artifacts(ctx, host_only, pages, data)
